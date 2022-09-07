@@ -8,7 +8,9 @@ layout(binding = 1) uniform sampler2D GBuffer1;
 layout(binding = 2) uniform sampler2D LowResGBuffer0;
 layout(binding = 3) uniform sampler2D LowResGBuffer1;
 layout(binding = 4) uniform sampler2D LowResIndirect;
-
+layout(binding = 5) uniform sampler2D RSMBuffer0;
+layout(binding = 6) uniform sampler2D RSMBuffer1;
+layout(binding = 7) uniform sampler2D RSMBuffer2;
 
 layout(std140, binding = 0) uniform Indirect{
     mat4 RSMLightViewProj;
@@ -23,9 +25,7 @@ layout(std140, binding = 1) uniform Light{
     vec3 LightRadiance;
 };
 
-layout(binding = 5) uniform sampler2D RSMBuffer0;
-layout(binding = 6) uniform sampler2D RSMBuffer1;
-layout(binding = 7) uniform sampler2D RSMBuffer2;
+
 
 layout(std430, binding = 0) buffer PossionDiskSampleBuffer{
     vec4 PossionDiskSamples[];
@@ -37,9 +37,10 @@ vec4 worldToRSMClip(vec3 world_pos){
 
 vec3 decodeNormal(vec2 f)
 {
+    f = f * 2.0 - 1.0;
     vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
     float t = clamp(-n.z, 0, 1);
-    n.xy += all(greaterThanEqual(n.xy, vec2(0.0))) ? vec2(-t) : vec2(t);
+    n.xy += vec2((n.x >= 0 ? -t : t), (n.y >= 0 ? -t : t));
     return normalize(n);
 }
 
@@ -54,7 +55,7 @@ vec3 estimetaIndirect(vec4 rsmClipPos, vec3 pos, vec3 normal){
         vec2 rsm_pos = rsm_center + raw_sample.xy;
         float weight = raw_sample.z;
 
-        if(all(equal(clamp(rsm_pos, vec3(0), vec3(1)), rsm_pos))){
+        if(all(equal(clamp(rsm_pos, vec2(0), vec2(1)), rsm_pos))){
             vec3 world_pos = texture(RSMBuffer0, rsm_pos).xyz;
             vec3 world_normal = texture(RSMBuffer1, rsm_pos).xyz;
             vec3 flux = texture(RSMBuffer2, rsm_pos).xyz;
@@ -86,10 +87,10 @@ bool isLowResPixelGood(int x, int y, vec3 ideal_normal, vec3 ideal_color, out ve
     vec3 normal = decodeNormal(vec2(gbuffer0.w, gbuffer1.w));
     vec3 color = gbuffer1.rgb;
 
-    if(dot(normal, ideal_normal) < 0.8)
+    if(dot(normal, ideal_normal) < 0.9)
         return false;
 
-    if(any(greater(color - ideal_color,vec3(0.1))))
+    if(any(greaterThan(abs(color - ideal_color),vec3(0.1))))
         return false;
 
     indirect = lowres_indirect.rgb;
@@ -98,11 +99,11 @@ bool isLowResPixelGood(int x, int y, vec3 ideal_normal, vec3 ideal_color, out ve
 }
 
 vec3 getIndirect(vec2 uv, vec3 color, vec3 world_pos, vec3 world_normal){
-    if(!EnableIndirect)
+    if((EnableIndirect & 1) == 0)
         return vec3(0);
     // disable low res indirect
     if(((EnableIndirect >> 1) & 1) == 0)
-        return estimetaIndirect(worldToRMSClip(world_pos), world_pos, world_normal);
+        return estimetaIndirect(worldToRSMClip(world_pos), world_pos, world_normal);
 
     ivec2 res = textureSize(LowResIndirect, 0);
 
@@ -114,8 +115,8 @@ vec3 getIndirect(vec2 uv, vec3 color, vec3 world_pos, vec3 world_normal){
     int ay = by - 1;
 
     // weight
-    float tbx = uv.x * width - (ax + 0.5);
-    float tby = uv.y * height - (ay + 0.5);
+    float tbx = uv.x * res.x - (ax + 0.5);
+    float tby = uv.y * res.y - (ay + 0.5);
     float tax = 1 - tbx;
     float tay = 1 - tby;
 
@@ -152,14 +153,14 @@ vec3 getIndirect(vec2 uv, vec3 color, vec3 world_pos, vec3 world_normal){
     if(sum_count > 2)
         return sum / sum_weight;
 
-    return estimetaIndirect(worldToRMSClip(world_pos), world_pos, world_normal);
+    return estimetaIndirect(worldToRSMClip(world_pos), world_pos, world_normal);
 }
 
 
 void main(){
     vec4 gbuffer0 = texture(GBuffer0, iUV);
     if(gbuffer0.w > 50)
-    discard;
+        discard;
     vec4 gbuffer1 = texture(GBuffer1, iUV);
 
     vec3 world_pos = gbuffer0.xyz;
@@ -172,7 +173,7 @@ void main(){
     vec3 indirect = getIndirect(iUV, color, world_pos, world_normal);
 
     vec3 radiance = LightRadiance * color * (cos_factor + indirect);
-
+//    oFragColor = vec4(world_normal, 1.0);
     oFragColor = vec4(pow(radiance, vec3(1.0 / 2.2)), 1.0);
 }
 

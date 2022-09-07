@@ -1,6 +1,9 @@
 #pragma once
 #include <CGUtils/api.hpp>
 #include <CGUtils/model.hpp>
+#include <cyPoint.h>
+#include <cySampleElim.h>
+#include <random>
 using namespace wzz::gl;
 using namespace wzz::model;
 
